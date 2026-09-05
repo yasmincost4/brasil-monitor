@@ -28,8 +28,10 @@ Deno.serve(async () => {
       return Response.json({ ok: false, erro: "defina DEEPSEEK_API_KEY via supabase secrets set" }, { status: 400 });
     }
 
+    // só histórias com >=3 veículos: pares (n=2) costumam ser quase-duplicatas e
+    // não rendem comparação de ênfase — não vale o custo da IA.
     const { data: pendentes } = await supabase
-      .from("historias").select("id").is("analisado_em", null).gte("n_veiculos", 2).limit(10);
+      .from("historias").select("id").is("analisado_em", null).gte("n_veiculos", 3).limit(10);
 
     let analisadas = 0;
     for (const h of pendentes ?? []) {
