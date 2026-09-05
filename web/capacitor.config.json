@@ -1,0 +1,8 @@
+{
+  "appId": "com.brasilmonitor.app",
+  "appName": "Brasil Monitor",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  }
+}

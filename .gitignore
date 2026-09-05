@@ -1,0 +1,9 @@
+supabase/.temp/
+node_modules/
+web/node_modules/
+web/dist/
+web/android/
+web/ios/
+web/.env
+*.log
+.DS_Store
