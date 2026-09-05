@@ -1,4 +1,5 @@
 supabase/.temp/
+supabase/cron.local.sql
 node_modules/
 web/node_modules/
 web/dist/

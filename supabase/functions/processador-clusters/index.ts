@@ -12,7 +12,8 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-const LIMIAR = 0.82;   // similaridade mínima (cosseno) pra agrupar — ajuste fino aqui
+const LIMIAR = 0.86;        // similaridade mínima (cosseno) pra agrupar
+const TETO_VEICULOS = 5;   // grupo com mais veículos que isso ≈ over-merge → descarta
 const JANELA_H = 48;
 const desde = () => new Date(Date.now() - JANELA_H * 3600e3).toISOString();
 
@@ -25,20 +26,28 @@ function cosseno(a: number[], b: number[]) {
 
 Deno.serve(async () => {
   try {
-    // 1) gerar embeddings que faltam
+    // 1) gerar embeddings que faltam.
+    // Lotes pequenos: o gte-small no Edge runtime estoura o limite de CPU/memória
+    // se rodar muitas inferências numa chamada só. O cron (a cada 30 min) e o
+    // catch-up manual completam o resto aos poucos.
+    const LOTE_EMB = 40;
+    const ORCAMENTO_MS = 55_000; // para antes de bater o wall-clock do worker
+    const t0 = Date.now();
+
     const { data: semEmb } = await supabase
       .from("eventos")
       .select("id,titulo,resumo")
       .in("camada", ["noticias", "contabil"])
       .is("embedding", null)
       .gte("coletado_em", desde())
-      .limit(200);
+      .limit(LOTE_EMB);
 
     let geradas = 0;
     if (semEmb?.length) {
       const model = new Supabase.ai.Session("gte-small");
       for (const n of semEmb) {
-        const texto = `${n.titulo}. ${n.resumo ?? ""}`.slice(0, 1000);
+        if (Date.now() - t0 > ORCAMENTO_MS) break;
+        const texto = `${n.titulo}. ${n.resumo ?? ""}`.slice(0, 500);
         const emb: number[] = await model.run(texto, { mean_pool: true, normalize: true });
         await supabase.from("eventos").update({ embedding: `[${emb.join(",")}]` }).eq("id", n.id);
         geradas++;
@@ -61,6 +70,7 @@ Deno.serve(async () => {
 
     const usados = new Set<number>();
     let novas = 0;
+    let descartados = 0;
 
     for (let i = 0; i < itens.length; i++) {
       if (usados.has(itens[i].id)) continue;
@@ -71,6 +81,18 @@ Deno.serve(async () => {
       }
       const veiculos = new Set(grupo.map((g) => g.fonte));
       if (veiculos.size < 2) continue; // só vira história com >=2 veículos diferentes
+
+      // Grupo grande demais = o limiar juntou coisa não relacionada. Não cria
+      // história; marca como usados pra não reprocessar o mesmo blob.
+      if (veiculos.size > TETO_VEICULOS) {
+        console.warn(
+          `over-merge descartado: ${veiculos.size} veículos, ${grupo.length} itens — ` +
+          `âncora [${itens[i].fonte}] "${itens[i].titulo}"`,
+        );
+        for (const g of grupo) usados.add(g.id);
+        descartados++;
+        continue;
+      }
 
       const { data: h, error } = await supabase
         .from("historias")
@@ -83,7 +105,7 @@ Deno.serve(async () => {
       novas++;
     }
 
-    return Response.json({ ok: true, embeddings_geradas: geradas, novas_historias: novas });
+    return Response.json({ ok: true, embeddings_geradas: geradas, novas_historias: novas, over_merge_descartados: descartados });
   } catch (e) {
     return Response.json({ ok: false, erro: String(e) }, { status: 500 });
   }
