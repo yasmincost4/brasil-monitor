@@ -1,103 +1,44 @@
 # Brasil Monitor
 
-Painel de inteligência em tempo real com foco no Brasil. Os coletores puxam as
-fontes → gravam num banco normalizado no Supabase → o front lê e mostra, em tempo
-real, funcionando offline. Organiza as fontes; nunca se coloca como dono da verdade.
+**Painel de inteligência em tempo real com foco no Brasil.** Consolida num só lugar notícias, economia, meio ambiente, clima, política e checagem de fatos — puxando de fontes de dados abertos brasileiras que normalmente vivem espalhadas por dezenas de órgãos. Roda como app web e como **APK Android que funciona offline**.
 
-## O que já funciona (Fases 0, 1 e 2)
+Inspirado no [World Monitor](https://worldmonitor.app), mas construído de baixo pra cima sobre as fontes do Brasil, que o original cobre pouco.
 
-**Painel** — mapa com queimadas (INPE) e terremotos (USGS), coloridos por camada e
-dimensionados por severidade, com legenda e **filtro por UF**; painéis de economia
-(BCB, com minigráfico), alertas (INMET) e notícias (Agência Brasil). Offline via PWA.
+## O que faz
 
-**Contábil** — indicadores fiscais e econômicos (IGP-M, INPC, CDI, IPCA, Selic, dólar),
-notícias contábeis/fiscais, agenda de obrigações (SPED, DCTF, eSocial...) e tabelas de
-referência (INSS, IRRF, Simples). Feito pra quem estuda/atua em contabilidade.
+- **Painel** — mapa do Brasil (MapLibre) com focos de queimada (INPE) e terremotos (USGS), coloridos por camada e por severidade, com filtro por UF; painéis de economia (dólar, Selic, IPCA), alertas do INMET e notícias.
+- **Contábil** — indicadores fiscais (IGP-M, INPC, CDI), notícias contábeis/fiscais, agenda de obrigações (SPED, DCTF, eSocial…) e tabelas de referência (INSS, IRRF, Simples).
+- **Cívico** — votações recentes da Câmara dos Deputados e gastos federais.
+- **Comparador de vieses** — agrupa a mesma notícia entre vários veículos (embeddings + clustering), mostra o núcleo comum de fatos e a ênfase de cada um (análise por IA), com um brief diário.
+- **Checagem** — agrega checagens de fatos de agências brasileiras e leva ao veredito da fonte original.
+- **Offline** — PWA + Capacitor; abre e mostra o último estado mesmo sem rede.
 
-**Cívico** — votações recentes da Câmara e gastos federais (Portal da Transparência).
+## O princípio: organizar as fontes, não decretar a verdade
 
-**Comparador** — agrupa a mesma notícia entre veículos (embeddings + clustering),
-mostra o **núcleo comum** de fatos e a **ênfase de cada um** (análise por IA), e um
-**brief diário**. Não decide a verdade: mostra a divergência. O rótulo de viés dos
-veículos vem de método aberto que você configura — nunca embutido.
+O comparador de vieses não julga. Ele mostra o que os veículos têm em comum e onde divergem, e leva sempre à fonte. O rótulo de "lado" de cada veículo não é opinião do projeto: vive numa tabela (`veiculos.vies`) preenchida por método aberto e citável, com a origem registrada em `veiculos.fonte_rotulo`. A aba de Checagem segue a mesma regra: agrega e aponta, nunca reescreve o veredito.
 
-**Checagem** — aba anti-fake-news: agrega checagens (Google FactCheck) e **sempre
-linka o veredito da fonte original**. O app não julga.
+## Fontes de dados
 
-## Estrutura
+Todas públicas: INPE (queimadas), USGS (terremotos), Banco Central/SGS (economia), INMET (clima e alertas), Câmara dos Deputados (votações), Portal da Transparência (gastos), Google Fact Check Tools (checagem), e RSS de vários veículos de imprensa.
 
-```
-brasil-monitor/
-├── supabase/
-│   ├── schema.sql            ← Fases 0–1 (eventos, series_economicas, RLS, realtime)
-│   ├── schema-fase2.sql      ← coluna uf + tabela checagens
-│   ├── schema-fase3.sql      ← historias, veiculos, briefs, embeddings
-│   ├── veiculos-seed.sql     ← veículos (viés VAZIO de propósito — método aberto)
-│   ├── cron.sql              ← agendamento dos 8 coletores (ou use a UI do painel)
-│   └── functions/
-│       ├── coletor-agencia-brasil/    RSS  → eventos (notícias)
-│       ├── coletor-bcb-sgs/           JSON → series (dólar,Selic,IPCA,IGP-M,INPC,CDI)
-│       ├── coletor-inpe-queimadas/    CSV  → eventos (focos, mapa, com UF)
-│       ├── coletor-usgs-terremotos/   GeoJSON → eventos (sismos, mapa)
-│       ├── coletor-inmet-alertas/     JSON → eventos (avisos)
-│       ├── coletor-camara-votacoes/   JSON → eventos (política)
-│       ├── coletor-transparencia/     JSON → eventos (gastos) — requer token
-│       ├── coletor-factcheck/         JSON → checagens — requer chave
-│       ├── coletor-noticias-fiscais/  RSS  → eventos (contábil/fiscal)
-│       ├── processador-clusters/      embeddings (gte-small) + agrupamento
-│       ├── analisador-vieses/         IA → núcleo comum + ênfases — requer chave
-│       └── brief-diario/              IA → brief do dia — requer chave
-└── web/                      ← React + Vite + MapLibre + PWA
-    ├── src/components/{Mapa,Sparkline,Contabil,Comparador,Civico,Checagem}.jsx
-    └── src/data/contabil.js   ← agenda e tabelas (editáveis)
-```
+## Arquitetura
 
-## Como rodar
+Coletores (Edge Functions + pg_cron) normalizam as fontes → Supabase (Postgres + pgvector + Realtime + RLS) → PWA (React + MapLibre) empacotado em APK com Capacitor. A análise de vieses e o brief usam a API DeepSeek; os embeddings usam o gte-small embutido no Supabase. Segredos vivem só no Supabase Vault e nos secrets do GitHub, nunca no código.
 
-1. **Banco.** Rode, em ordem: `schema.sql`, `schema-fase2.sql`, `schema-fase3.sql` e
-   `veiculos-seed.sql` no SQL Editor.
-2. **Segredos** dos coletores que exigem credencial:
-   ```bash
-   supabase secrets set PORTAL_TRANSPARENCIA_TOKEN=xxximp   # conta gov.br
-   supabase secrets set GOOGLE_FACTCHECK_KEY=xxximp          # chave grátis do Google
-   supabase secrets set ANTHROPIC_API_KEY=xxximp             # análise de vieses + brief
-   ```
-3. **Coletores.** `supabase functions deploy coletor-<nome>` e dispare cada um uma vez.
-4. **Agendamento.** Aba Cron do painel, ou `supabase/cron.sql`.
-5. **Front.**
-   ```bash
-   cd web && cp .env.example .env   # URL + anon key
-   npm install && npm run dev
-   ```
-6. **APK Android.** Veja **`BUILD-ANDROID.md`** — vira APK instalável via Capacitor
-   (assets embutidos, abre offline) ou via PWABuilder (a partir do site publicado).
+## Stack
 
-## ⚠️ Endpoints/credenciais a confirmar
+React · Vite · MapLibre GL · PWA · Capacitor (Android) · Supabase (Postgres, pgvector, Edge Functions em Deno/TypeScript, Realtime) · DeepSeek API.
 
-Verificados via testes de lógica; estes dependem da rede/credencial real:
-- **Agência Brasil** (`FEED_URL`) e **INPE** (`CSV_URL`) — caminhos mudam de tempos em tempos.
-- **INMET avisos** (`FEED`) — shape varia; o coletor tolera e guarda o cru em `bruto`.
-- **Transparência** — precisa de token; endpoint/campos a confirmar (item cru em `bruto`).
-- **FactCheck** — precisa de chave grátis do Google.
+## Rodando
 
-Cada coletor devolve `{ ok, ... }`; se `ok:false`, o campo `erro` diz o que houve.
+- **Backend:** aplique os SQLs de `supabase/` e faça deploy das funções de `supabase/functions/`. Agendamento em `supabase/cron.sql`.
+- **App web:** em `web/`, copie `.env.example` para `.env`, `npm install`, `npm run dev`.
+- **APK Android:** veja `BUILD-ANDROID.md`.
 
-## Princípio das camadas analíticas
+## Licença
 
-A Checagem só agrega e aponta pra fonte — nunca reescreve o veredito. É o mesmo
-princípio que vai reger o comparador de vieses na Fase 3: mostrar a divergência e as
-fontes, sem decretar a verdade.
+[MIT](LICENSE).
 
-## Notas da Fase 3
+## Créditos
 
-- **Embeddings** usam o gte-small embutido no runtime do Supabase — sem chave externa.
-- **Análise de vieses e brief** usam a API da Anthropic (`ANTHROPIC_API_KEY`). Ajuste
-  o `MODELO` no topo de cada função pro modelo disponível na sua conta.
-- **Viés dos veículos**: `veiculos.vies` nasce NULL. Preencha com método aberto e
-  citável (`veiculos-seed.sql` explica). Sem isso, o comparador ainda agrupa e mostra
-  a ênfase por veículo — só não colore por lado.
-
-## Próximo passo
-
-Polir o método de classificação de viés, ajustar o limiar de clustering, e as
-variantes temáticas de um mesmo código (economia, meio ambiente, política).
+Inspirado no World Monitor, de koala73. Construído com dados abertos de INPE, Banco Central, INMET, USGS, Câmara dos Deputados, Portal da Transparência e agências de checagem brasileiras.
