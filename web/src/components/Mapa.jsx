@@ -94,14 +94,21 @@ export default function Mapa({ uf }) {
     carregarRef.current = carregar;
 
     async function carregar() {
-      let q = supabase
-        .from("eventos")
-        .select("titulo,url,camada,severidade,lat,lng")
-        .not("lat", "is", null);
-      if (ufRef.current) q = q.eq("uf", ufRef.current); // filtro por região
-      const { data } = await q
-        .order("coletado_em", { ascending: false })
-        .limit(3000);
+      // Busca separada por camada: as queimadas (milhares de focos) não podem
+      // consumir toda a cota e sumir com os sismos.
+      async function fetchCamada(camada, limite, aplicaUf) {
+        let q = supabase.from("eventos")
+          .select("titulo,url,camada,severidade,lat,lng")
+          .eq("camada", camada).not("lat", "is", null);
+        if (aplicaUf && ufRef.current) q = q.eq("uf", ufRef.current);
+        const { data } = await q.order("coletado_em", { ascending: false }).limit(limite);
+        return data ?? [];
+      }
+      const [amb, sis] = await Promise.all([
+        fetchCamada("meio_ambiente", 2500, true),
+        fetchCamada("sismos", 500, false),
+      ]);
+      const data = [...amb, ...sis];
 
       const src = mapa.current?.getSource("eventos");
       if (!src || !data) return;
